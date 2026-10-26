@@ -1,0 +1,12 @@
+runs/
+.env
+owned-apps.txt
+*.p8
+*.p12
+*.cer
+*.mobileprovision
+*.ipa
+*.xcarchive
+*.keychain-db
+__pycache__/
+.DS_Store

@@ -1,0 +1,6 @@
+#!/bin/bash
+# release [APP_DIR] [build_only]  - queue an iOS release run in Dagu (watch it at http://127.0.0.1:8080)
+APP_DIR="$(cd "${1:-.}" && pwd)"; MODE="${2:-full}"
+[ "$MODE" = build_only ] || MODE=full
+dagu enqueue app-release -- APP_DIR="$APP_DIR" MODE="$MODE" 2>&1 | grep -v "level=WARN"
+echo "Queued $(basename "$APP_DIR") ($MODE). Progress: http://127.0.0.1:8080/dags/app-release"

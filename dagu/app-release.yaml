@@ -1,0 +1,86 @@
+# App release: build -> test -> archive -> sign -> TestFlight -> (human approves) -> App Store review.
+# Scripts live in $RELEASE_HOME (this repo). Each run keeps its files in
+# $RELEASE_HOME/runs/<run id>. Retry from the failed step in the UI; earlier steps keep.
+# MODE=build_only stops after the signed .ipa: nothing is sent to Apple.
+description: Ship an iOS app to TestFlight, then to App Store review after approval
+type: graph
+
+params:
+  - name: APP_DIR
+    description: App folder, e.g. ~/Developer/MyApp
+    required: true
+  - name: SCHEME
+    description: Xcode scheme (blank picks the one named after the project)
+    default: ""
+  - name: TESTS
+    enum: [auto, skip]
+    default: auto
+  - name: MODE
+    description: full uploads to TestFlight; build_only stops at a signed .ipa
+    enum: [full, build_only]
+    default: full
+
+env:
+  # Edit RELEASE_HOME to where you cloned this repo.
+  - RELEASE_HOME: ${HOME}/Developer/ios-release-pipeline
+  - WORK: ${RELEASE_HOME}/runs/${context.run.id}
+  - S: ${RELEASE_HOME}/steps
+
+steps:
+  - id: preflight
+    run: /bin/bash "$S/1-preflight.sh" "${params.APP_DIR}" "${params.SCHEME}"
+    retry_policy: { limit: 2, interval_sec: 20 }
+
+  - id: test
+    depends: [preflight]
+    run: /bin/bash "$S/2-test.sh" "${params.TESTS}"
+
+  - id: archive
+    depends: [test]
+    run: /bin/bash "$S/3-archive.sh"
+
+  - id: sign
+    depends: [archive]
+    run: /bin/bash "$S/4-sign-export.sh"
+    retry_policy: { limit: 1, interval_sec: 30 }
+
+  - id: upload
+    depends: [sign]
+    preconditions:
+      - condition: "${params.MODE}"
+        expected: full
+    run: /bin/bash "$S/5-upload.sh"
+    retry_policy: { limit: 3, interval_sec: 90 }
+
+  - id: testflight
+    depends: [upload]
+    run: /bin/bash "$S/6-testflight.sh"
+    retry_policy: { limit: 2, interval_sec: 120 }
+
+  - id: approve
+    depends: [testflight]
+    action: human.task
+    with:
+      prompt: >-
+        The build is on TestFlight. Install it from the TestFlight app and try it.
+        Submit this version for App Store review?
+      form:
+        type: object
+        properties:
+          decision:
+            type: string
+            enum: [submit, testflight_only]
+            default: testflight_only
+          whats_new:
+            type: string
+            description: Release notes (ignored on an app's first version)
+            default: ""
+        required: [decision]
+
+  - id: submit
+    depends: [approve]
+    run: /bin/bash "$S/7-submit.sh" "${steps.approve.outputs.decision}" "${steps.approve.outputs.whats_new}"
+
+handler_on:
+  failure:
+    run: osascript -e 'display notification "A release step failed. Open Dagu for the log." with title "App release"'
